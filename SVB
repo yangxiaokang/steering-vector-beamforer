@@ -1,1 +1,52 @@
+def steering_vector_beamformer(signal, spk_angle, num_mic, time_delay=None, n_fft=512, fs=16000, d=0.04, 
+                                   c=343, ch=0):
+    tao0 = d/c
+    theta_target = np.array(spk_angle)
+    num_source = len(theta_target)
+    
+    
+    omega = np.zeros((int(n_fft/2+1), 1))
+    H = np.zeros((int(n_fft/2)+1, num_source, num_mic), dtype=np.complex)
+    steer_vector = np.zeros((num_source, num_mic, int(n_fft/2)+1), dtype=np.complex)
+    
+    
+    src = util.get_3dim_spectrum_from_data(signal, FFT_LENGTH, FFT_SHIFT, FFT_LENGTH)
+    src = src[0]
+    src = np.transpose(src,(0,2,1))
+    Y_out = np.zeros((num_source, src.shape[1], src.shape[2]), dtype=np.complex)
+    frame_num = src.shape[2]
+    
+    weight =[]
+    for i in range(1, int(n_fft/2)+1, 1):
+        omega[i] = 2*np.pi*i*fs/n_fft
+        D_w = []
+        for s in range(num_source):
+            d_w = []
+            for m in range(num_mic):
+                d_w.append(np.exp(1j*omega[i]*tao0*(np.cos(spk_angle[s]-(2*np.pi*(m)/num_mic)) - np.cos(spk_angle[s]-(2*np.pi*(ch-1)/num_mic)))))
+            
+            D_w.append(d_w)
+        steer_vector[:,:,i] = D_w
+        D_w = np.array(D_w, dtype=np.complex)[:,:,0]
+        
+        D_w_inv = np.linalg.pinv(D_w.T)
+        weight_inv = 1
+        if i<257:
+            weight_inv = np.linalg.norm(D_w_inv)
+        #weight = np.linalg.norm(np.dot(D_w_inv, D_w.T))
+        
+        weight.append(weight_inv)
+        H[i] = D_w_inv#/weight_inv
+    
+    frame_num = src.shape[2]
+    for f in range(frame_num):
+        for s in range(num_source):         
+            yy = src[:,:,f]
+            Y_out[s,:,f] = np.sum(yy*H[:,s,:].T, axis=0)
+    output = []     
+    for s in range(num_source):
+        
+        y = librosa.istft(Y_out[s], hop_length=n_fft//2)    
+        output.append(np.real(y))
 
+    return output, steer_vector
